@@ -1,4 +1,5 @@
 from datetime import datetime
+import hmac
 from pathlib import Path
 import streamlit as st
 from allocator import (
@@ -21,6 +22,44 @@ st.set_page_config(
     page_icon="📦",
     layout="wide",
 )
+
+def check_password():
+    entered_password = st.session_state.get("password", "")
+    try:
+        correct_password = st.secrets["auth"]["password"]
+    except Exception:
+        st.error(
+            "未找到登录密码配置，请在 Streamlit App Settings → Secrets 中设置 [auth] password。"
+            " / Password configuration not found. Please set [auth] password in Streamlit Secrets."
+        )
+        return
+
+    if hmac.compare_digest(entered_password, correct_password):
+        st.session_state["authenticated"] = True
+        st.session_state["password"] = ""
+    else:
+        st.session_state["authenticated"] = False
+
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+
+if not st.session_state["authenticated"]:
+    st.title("📦 Amazon FBA Pallet Allocation Tool")
+    st.caption("Amazon FBA 托盘分配工具")
+
+    st.text_input(
+        "密码 / Password",
+        type="password",
+        key="password",
+        on_change=check_password,
+    )
+
+    if st.session_state.get("password") and not st.session_state["authenticated"]:
+        st.error("密码错误 / Incorrect password")
+
+    st.stop()
 
 PRODUCT_FILE = Path(__file__).resolve().parent / "Product.xlsx"
 
