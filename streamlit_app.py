@@ -20,8 +20,6 @@ from allocator import (
     load_product_master,
 )
 
-APP_VERSION = "2026.07.13-v2.1"
-
 st.set_page_config(
     page_title="Amazon FBA Pallet Allocation Tool",
     page_icon="📦",
@@ -32,17 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PRODUCT_FILE = BASE_DIR / "Product.xlsx"
 
 
-@st.cache_data(show_spinner=False)
-def get_product_status(product_path: str, modified_time: float) -> tuple[int, int]:
-    product_df, warnings_df = load_product_master(product_path)
-    return len(product_df), len(warnings_df)
-
-
 st.title("📦 Amazon FBA Pallet Allocation Tool")
-st.caption(
-    f"版本：{APP_VERSION} ｜ 固定 Product.xlsx，只需上传同格式订单 Excel。"
-)
-
 with st.expander("当前分配规则", expanded=False):
     st.markdown(
         f"""
@@ -59,19 +47,6 @@ if not PRODUCT_FILE.exists():
         "项目目录中找不到固定产品资料文件 Product.xlsx。"
         "请把 Product.xlsx 放在 streamlit_app.py 同一目录。"
     )
-    st.stop()
-
-try:
-    sku_count, product_warning_count = get_product_status(
-        str(PRODUCT_FILE), PRODUCT_FILE.stat().st_mtime
-    )
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("固定产品主数据", f"{sku_count:,} 个唯一 SKU")
-    c2.metric("托盘容量", f"{PALLET_CAPACITY_IN3:,.0f} in³")
-    c3.metric("产品资料警告", product_warning_count)
-    c4.metric("应用版本", APP_VERSION)
-except Exception as exc:
-    st.error(f"Product.xlsx 读取失败：{exc}")
     st.stop()
 
 uploaded_order = st.file_uploader(
@@ -127,8 +102,7 @@ if uploaded_order is not None:
                     st.subheader("未匹配明细")
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                     st.info(
-                        "如果这里显示的未匹配数量不是 0，请确认 Streamlit 页面顶部版本必须是 "
-                        f"{APP_VERSION}，且固定产品主数据应显示 347 个唯一 SKU。"
+                        "请确认 GitHub 中使用的是最新的 streamlit_app.py、allocator.py 和 Product.xlsx。"
                     )
                     st.stop()
 
