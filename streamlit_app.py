@@ -1,150 +1,47 @@
-from __future__ import annotations
-
 from datetime import datetime
 from pathlib import Path
-
 import streamlit as st
-
-from allocator import (
-    ORDER_ARN,
-    ORDER_MODEL,
-    ORDER_UPC,
-    PALLET_CAPACITY_IN3,
-    PALLET_HEIGHT_IN,
-    PALLET_LENGTH_IN,
-    PALLET_WIDTH_IN,
-    allocate_orders,
-    build_output_excel,
-    enrich_order_with_product,
-    load_order,
-    load_product_master,
-)
-
-st.set_page_config(
-    page_title="Amazon FBA Pallet Allocation Tool",
-    page_icon="📦",
-    layout="wide",
-)
-
-BASE_DIR = Path(__file__).resolve().parent
-PRODUCT_FILE = BASE_DIR / "Product.xlsx"
-
-
-st.title("📦 Amazon FBA Pallet Allocation Tool")
-with st.expander("当前分配规则", expanded=False):
-    st.markdown(
-        f"""
-- 托盘体积上限：**{PALLET_LENGTH_IN:.0f} × {PALLET_WIDTH_IN:.0f} × {PALLET_HEIGHT_IN:.0f} = {PALLET_CAPACITY_IN3:,.0f} in³**。
-- 产品资料自动转换：**kg → lb，cm → inch**。
-- **混合打托**：使用该 ARN 的固定 Pallets 总数；每托至少 2 个不同 SKU；每托体积不得超限；在硬约束内优先让每个 SKU 分配尽量平均，再平衡各托体积。
-- **single sku pallet**：每个 SKU 行自己的 Pallets 数量是该 SKU 的固定托数；按“整除 + 余数”平均分配。
-- 若固定托数下无法满足规则，程序不会擅自增加或减少托盘，而是在“错误与警告”中说明原因。
-        """
-    )
-
+from allocator import ORDER_ARN, ORDER_MODEL, ORDER_UPC, allocate_orders, build_output_excel, enrich_order_with_product, load_order, load_product_master
+st.set_page_config(page_title='Amazon FBA Pallet Allocation Tool', page_icon='📦', layout='wide')
+PRODUCT_FILE = Path(__file__).resolve().parent / 'Product.xlsx'
+st.title('📦 Amazon FBA Pallet Allocation Tool')
 if not PRODUCT_FILE.exists():
-    st.error(
-        "项目目录中找不到固定产品资料文件 Product.xlsx。"
-        "请把 Product.xlsx 放在 streamlit_app.py 同一目录。"
-    )
+    st.error('Product.xlsx not found.')
     st.stop()
-
-uploaded_order = st.file_uploader(
-    "上传订单详情 Excel",
-    type=["xlsx"],
-    help="订单格式应与当前 Order.xlsx 一致。Product.xlsx 已固定在 GitHub 项目中。",
-)
-
+uploaded_order = st.file_uploader('上传订单 Excel', type=['xlsx'])
 if uploaded_order is not None:
-    st.success(f"已上传：{uploaded_order.name}")
-
-    if st.button("开始计算托盘分配", type="primary", use_container_width=True):
+    if st.button('开始计算托盘分配', type='primary', use_container_width=True):
         try:
-            with st.spinner("正在检查 UPC/SKU 匹配并计算托盘分配..."):
-                # Preflight diagnostic: use exactly the same loader/matcher as allocation.
+            with st.spinner('正在计算...'):
                 uploaded_order.seek(0)
                 order_df = load_order(uploaded_order)
                 product_df, _ = load_product_master(PRODUCT_FILE)
                 diagnostic_df = enrich_order_with_product(order_df, product_df)
-
-                unmatched_df = diagnostic_df.loc[~diagnostic_df["_matched"]].copy()
-                matched_count = int(diagnostic_df["_matched"].sum())
-                unmatched_count = int((~diagnostic_df["_matched"]).sum())
-
-                d1, d2, d3 = st.columns(3)
-                d1.metric("订单有效行", len(diagnostic_df))
-                d2.metric("产品资料已匹配", matched_count)
-                d3.metric("未匹配", unmatched_count)
-
-                if unmatched_count > 0:
-                    st.error(
-                        f"有 {unmatched_count} 条订单无法匹配当前 GitHub 中的 Product.xlsx。"
-                    )
-                    show_cols = [
-                        c
-                        for c in [
-                            "_row_no",
-                            ORDER_ARN,
-                            ORDER_MODEL,
-                            ORDER_UPC,
-                            "_upc_key",
-                            "_model_key",
-                        ]
-                        if c in unmatched_df.columns
-                    ]
-                    display_df = unmatched_df[show_cols].rename(
-                        columns={
-                            "_row_no": "Excel Row",
-                            "_upc_key": "Normalized UPC",
-                            "_model_key": "Normalized Model",
-                        }
-                    )
-                    st.subheader("未匹配明细")
-                    st.dataframe(display_df, use_container_width=True, hide_index=True)
-                    st.info(
-                        "请确认 GitHub 中使用的是最新的 streamlit_app.py、allocator.py 和 Product.xlsx。"
-                    )
+                unmatched_df = diagnostic_df.loc[~diagnostic_df['_matched']].copy()
+                if not unmatched_df.empty:
+                    st.error(f'有 {len(unmatched_df)} 条订单无法匹配 Product.xlsx')
+                    show_cols = [c for c in [ORDER_ARN, ORDER_UPC, ORDER_MODEL] if c in unmatched_df.columns]
+                    st.dataframe(unmatched_df[show_cols].rename(columns={ORDER_ARN: 'ARN', ORDER_UPC: 'UPC', ORDER_MODEL: 'Model Number'}), use_container_width=True, hide_index=True)
                     st.stop()
-
                 uploaded_order.seek(0)
                 result = allocate_orders(uploaded_order, PRODUCT_FILE)
                 output_bytes = build_output_excel(result)
-
-            ok_count = int((result.arn_summary["Status"] == "OK").sum())
-            failed_count = int((result.arn_summary["Status"] != "OK").sum())
+            ok_count = int((result.arn_summary['Status'] == 'OK').sum())
+            failed_count = int((result.arn_summary['Status'] != 'OK').sum())
             pallet_count = len(result.pallet_summary)
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("成功 ARN", ok_count)
-            m2.metric("失败 ARN", failed_count)
-            m3.metric("已生成托盘", pallet_count)
-
-            st.subheader("ARN 汇总")
-            st.dataframe(result.arn_summary, use_container_width=True, hide_index=True)
-
+            c1, c2, c3 = st.columns(3)
+            c1.metric('成功 ARN', ok_count)
+            c2.metric('失败 ARN', failed_count)
+            c3.metric('托盘数', pallet_count)
             if not result.issues.empty:
-                st.subheader("⚠️ 错误与警告")
+                st.error('部分 ARN 分配失败')
                 st.dataframe(result.issues, use_container_width=True, hide_index=True)
-
-            if not result.pallet_summary.empty:
-                st.subheader("托盘汇总")
-                st.dataframe(result.pallet_summary, use_container_width=True, hide_index=True)
-
-            if not result.detail.empty:
-                with st.expander("查看托盘分配明细"):
-                    st.dataframe(result.detail, use_container_width=True, hide_index=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            st.download_button(
-                label="⬇️ 下载托盘分配结果 Excel",
-                data=output_bytes,
-                file_name=f"Amazon_FBA_Pallet_Allocation_{timestamp}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True,
-            )
-
+            detail = result.detail[['Shipment ID (ARN)', 'Pallet No.', 'UPC/SKU', 'Model Number', 'Allocated Boxes']].copy()
+            detail = detail.rename(columns={'Shipment ID (ARN)': 'ARN', 'Pallet No.': 'Pallet', 'UPC/SKU': 'UPC', 'Allocated Boxes': 'Quantity'})
+            if not detail.empty:
+                detail = detail.sort_values(['ARN', 'Pallet', 'Model Number'], kind='stable').reset_index(drop=True)
+            st.dataframe(detail, use_container_width=True, hide_index=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            st.download_button('下载结果 Excel', data=output_bytes, file_name=f'Amazon_FBA_Pallet_Allocation_{timestamp}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', type='primary', use_container_width=True)
         except Exception as exc:
-            st.exception(exc)
-else:
-    st.info("请先上传订单 Excel。")
+            st.error(str(exc))
